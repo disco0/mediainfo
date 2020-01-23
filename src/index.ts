@@ -50,6 +50,7 @@ async function GetSize(path: PathLike, headers = {}) {
 }
 
 function GetStream(path: PathLike, start = 0, length = -1, headers = {}): any {
+  // console.log('GetStream - ', path, start, length, headers)
   if (path.toString().indexOf('http') === 0) {
     return Request({
       url: path.toString(),
@@ -65,42 +66,72 @@ function GetStream(path: PathLike, start = 0, length = -1, headers = {}): any {
   });
 }
 
-export default function MediaInfo(path: PathLike, headers = {}): Promise<MediaInfoResponse> {
+export default function MediaInfo(path: PathLike, headers = {}, predefinedSize = 0): Promise<MediaInfoResponse> {
   return new Promise(async (resolve) => {
 
     if (!MediaInfoModule) {
       await Init();
     }
 
-    let seekTo: number;
+    let seekTo: number;    
 
-    const stream = GetStream(path, 0, 1024 * 1024, headers);
+    var stream: any;
+    if (predefinedSize > 0 ){
+      stream = GetStream(path, 0, predefinedSize, headers);
+    } else {
+      stream = GetStream(path, 0, 1024 * 1024, headers);
+    }
+    
     const size = await GetSize(path);
 
     const MI = new MediaInfoModule.MediaInfo();
-    MI.Open_Buffer_Init(size, 0);
 
-
-    stream.on('data', (chunk: any) => {
-      MI.Open_Buffer_Continue(chunk);
-      seekTo = MI.Open_Buffer_Continue_Goto_Get();
-      // console.log('SeekTo', seekTo);
-
-      if (seekTo !== -1) {
-        MI.Open_Buffer_Init(size, seekTo);
-        if (typeof (stream.close) !== 'undefined') {
-          stream.close();
+    if (predefinedSize < 1) {
+      MI.Open_Buffer_Init(size, 0);
+      stream.on('data', (chunk: any) => {
+        MI.Open_Buffer_Continue(chunk);
+        seekTo = MI.Open_Buffer_Continue_Goto_Get();
+        // console.log('SeekTo', seekTo);
+  
+        if (seekTo !== -1) {
+          MI.Open_Buffer_Init(size, seekTo);
+          if (typeof (stream.close) !== 'undefined') {
+            stream.close();
+          }
         }
-      }
-    });
+      });
+    } else {
+      MI.Open_Buffer_Init(predefinedSize, 0);
+      stream.on('data', (chunk: any) => {
+        MI.Open_Buffer_Continue(chunk);
+        seekTo = MI.Open_Buffer_Continue_Goto_Get();
+  
+        if (seekTo !== -1) {
+          // TODO check further of the logic related to reading specific chunk of the stream
+          // MI.Open_Buffer_Init(size, seekTo);
+          
+          if (typeof (stream.close) !== 'undefined') {
+            stream.close();
+          }
+        }
+      });
+    }
+    
 
     stream.on('close', () => {
-      const newstream = GetStream(path, seekTo, 1024 * 1024, headers);
+      var newstream: any  = {};
+
+      // console.log('GetStream -- oncloze', path, 0, predefinedSize, headers);
+      if (predefinedSize > 0) {
+        newstream = GetStream(path, seekTo, predefinedSize, headers);
+      } else {
+        newstream = GetStream(path, seekTo, 1024 * 1024, headers);
+      }
 
       newstream.on('data', (chunk: any) => {
         MI.Open_Buffer_Continue(chunk);
         seekTo = MI.Open_Buffer_Continue_Goto_Get();
-        // console.log('SeekTo', seekTo);
+        // console.log('SeekTo ON DATA', seekTo);
       });
 
       newstream.on('close', () => {
